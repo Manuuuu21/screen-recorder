@@ -2,6 +2,11 @@
 
 A lightweight, client-side screen recorder web app that captures and saves screen recordings directly from your browser — no servers, no uploads, and no internet connection required.
 
+## Try it here.
+https://manuuuu21.github.io/screen-recorder/
+
+It capture (Chrome Tab, Window, or Entire Screen of your Computer)
+
 ## Key features
 
 - 100% Offline: All recording, processing, and saving happens entirely in your browser. No data leaves your machine.
