@@ -5,7 +5,7 @@ A lightweight, client-side screen recorder web app that captures and saves scree
 ## Try it here.
 https://manuuuu21.github.io/screen-recorder/
 
-It capture (Chrome Tab, Window, or Entire Screen of your Computer)
+It capture (Tab, Window, or Entire Screen of your Computer)
 
 ## Key features
 
