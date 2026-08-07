@@ -268,6 +268,23 @@
                     </button>
                   </div>
                 </div>
+
+                <div class="flex flex-col gap-2 pt-3">
+                  <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Frame Rate (FPS)
+                  </label>
+                  <div class="grid grid-cols-3 gap-2">
+                    <button id="fps15" type="button" class="flex items-center justify-center py-2 px-3 rounded-xl border text-xs font-bold transition-all border-slate-100 hover:border-slate-200 text-slate-600 bg-slate-50/50 cursor-pointer">
+                      15 FPS
+                    </button>
+                    <button id="fps30" type="button" class="flex items-center justify-center py-2 px-3 rounded-xl border text-xs font-bold transition-all bg-blue-50 border-blue-500 text-blue-700 shadow-xs cursor-pointer">
+                      30 FPS (Def)
+                    </button>
+                    <button id="fps60" type="button" class="flex items-center justify-center py-2 px-3 rounded-xl border text-xs font-bold transition-all border-slate-100 hover:border-slate-200 text-slate-600 bg-slate-50/50 cursor-pointer">
+                      60 FPS
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -714,6 +731,7 @@
     let recordingType = 'audio'; // 'audio' | 'video'
     let audioSource = 'both'; // 'both' | 'tab' | 'microphone'
     let videoResolution = '1080p'; // '480p' | '720p' | '1080p'
+    let videoFps = 30; // 15 | 30 | 60
     let recordingTime = 0;
     let startTime = 0;
     let timerInterval = null;
@@ -753,6 +771,9 @@
     const res480p = document.getElementById('res480p');
     const res720p = document.getElementById('res720p');
     const res1080p = document.getElementById('res1080p');
+    const fps15 = document.getElementById('fps15');
+    const fps30 = document.getElementById('fps30');
+    const fps60 = document.getElementById('fps60');
     const audioSourceSelect = document.getElementById('audioSourceSelect');
     
     const recIndicator = document.getElementById('recIndicator');
@@ -970,6 +991,20 @@
     res480p.addEventListener('click', () => { videoResolution = '480p'; setResClass('480p'); });
     res720p.addEventListener('click', () => { videoResolution = '720p'; setResClass('720p'); });
     res1080p.addEventListener('click', () => { videoResolution = '1080p'; setResClass('1080p'); });
+
+    const setFpsClass = (selected) => {
+      [fps15, fps30, fps60].forEach(btn => {
+        if (btn.id === 'fps' + selected) {
+          btn.className = "flex items-center justify-center py-2 px-3 rounded-xl border text-xs font-bold transition-all bg-blue-50 border-blue-500 text-blue-700 shadow-xs cursor-pointer";
+        } else {
+          btn.className = "flex items-center justify-center py-2 px-3 rounded-xl border text-xs font-bold transition-all border-slate-100 hover:border-slate-200 text-slate-600 bg-slate-50/50 cursor-pointer";
+        }
+      });
+    };
+
+    fps15.addEventListener('click', () => { videoFps = 15; setFpsClass('15'); });
+    fps30.addEventListener('click', () => { videoFps = 30; setFpsClass('30'); });
+    fps60.addEventListener('click', () => { videoFps = 60; setFpsClass('60'); });
 
     audioSourceSelect.addEventListener('change', (e) => {
       audioSource = e.target.value;
@@ -1217,6 +1252,7 @@
         if (needsScreenShare) {
           let videoW = 1920, videoH = 1080, fRate = 30;
           if (recordingType === 'video') {
+            fRate = videoFps;
             if (videoResolution === '480p') { videoW = 854; videoH = 480; }
             else if (videoResolution === '720p') { videoW = 1280; videoH = 720; }
           } else {
