@@ -70,7 +70,7 @@ Contributions are welcome. Open an issue or submit a pull request with improveme
 
 ## License
 
-No license file is included in this repository by default. If you'd like to license this project, add a `LICENSE` file (for example, MIT) or specify your preferred license.
+No license file is included in this repository by default.
 
 ---
 
