@@ -150,7 +150,7 @@
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">
-            Screen Recorder <span class="text-teal-600 font-normal text-2xl sm:text-3xl block sm:inline sm:ml-2">Offline App</span>
+            Meet Recorder <span class="text-teal-600 font-normal text-2xl sm:text-3xl block sm:inline sm:ml-2">Offline App</span>
           </h1>
           <p class="text-slate-600 max-w-2xl text-sm sm:text-base mt-1">
             This is a self-contained, offline-compatible recording utility. Load this from local storage (<code class="bg-slate-100 px-1 py-0.5 rounded font-mono text-xs">file:///</code>) anywhere with zero internet connection. Your streams remain entirely private.
@@ -297,8 +297,8 @@
                 id="audioSourceSelect"
                 class="w-full py-3.5 px-4 bg-slate-50 border border-slate-100 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
               >
-                <option value="both">🎙️ Both (System Audio + Microphone)</option>
-                <option value="tab">💻 System Audio Only</option>
+                <option value="both">🎙️ Both (Tab Audio + Microphone)</option>
+                <option value="tab">💻 Tab Audio Only</option>
                 <option value="microphone">🎤 Your Microphone Only</option>
               </select>
             </div>
@@ -391,8 +391,33 @@
         </div>
 
         <!-- Media Player Panel -->
-        <div id="playerPanel" class="hidden p-5 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl text-white flex flex-col gap-4">
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div id="playerPanel" class="p-5 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl text-white flex flex-col gap-4">
+          
+          <!-- Empty State View -->
+          <div id="playerEmptyState" class="w-full aspect-video max-h-[540px] bg-slate-950/90 border border-slate-800/90 rounded-2xl flex flex-col items-center justify-center p-8 text-center shadow-2xl relative overflow-hidden group/empty">
+            <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-teal-500/5 pointer-events-none"></div>
+            <div class="w-20 h-20 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 mb-4 shadow-xl transition-all duration-300">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-10 h-10"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/><path d="m2 2 20 20"/></svg>
+            </div>
+            <h3 class="text-lg font-bold text-white mb-1.5 tracking-tight">No Video Played / Recorded</h3>
+            <p class="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
+              No video will be played or recorded until you start capturing a screen/audio recording above or upload a local file.
+            </p>
+            <label class="inline-flex items-center space-x-2 px-5 py-2.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl cursor-pointer transition shadow-lg shadow-indigo-600/30 active:scale-95">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span>Upload Local Video File</span>
+              <input
+                id="playerOfflineUpload"
+                type="file"
+                accept="video/*,audio/*"
+                class="hidden"
+              />
+            </label>
+          </div>
+
+          <!-- Active Player View -->
+          <div id="activePlayerView" class="hidden flex flex-col gap-4">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div class="flex items-center gap-2.5">
               <span id="playerIcon" class="p-2 bg-teal-500/20 text-teal-400 rounded-xl border border-teal-500/30">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
@@ -594,6 +619,7 @@
             <span class="text-[11px] text-teal-400 font-medium">
               ⚡ File stored locally. Clearing saves RAM.
             </span>
+          </div>
           </div>
         </div>
 
@@ -1086,9 +1112,18 @@
       if (typeof secs !== 'number' || isNaN(secs) || !isFinite(secs)) {
         return '00:00';
       }
-      const m = Math.floor(secs / 60);
+      const hrs = Math.floor(secs / 3600);
+      const mins = Math.floor((secs % 3600) / 60);
       const s = Math.floor(secs % 60);
-      return m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0');
+
+      const formattedMins = mins.toString().padStart(2, '0');
+      const formattedSecs = s.toString().padStart(2, '0');
+
+      if (hrs > 0) {
+        const formattedHrs = hrs.toString().padStart(2, '0');
+        return formattedHrs + ':' + formattedMins + ':' + formattedSecs;
+      }
+      return formattedMins + ':' + formattedSecs;
     }
 
     // --- REALTIME AUDIO VISUALIZERS RENDERING ---
@@ -1485,12 +1520,17 @@
     }
 
     function loadPlayerUI() {
+      const playerEmptyState = document.getElementById('playerEmptyState');
+      const activePlayerView = document.getElementById('activePlayerView');
+
       if (!activeMediaMeta) {
-        playerPanel.classList.add('hidden');
+        playerEmptyState.classList.remove('hidden');
+        activePlayerView.classList.add('hidden');
         return;
       }
 
-      playerPanel.classList.remove('hidden');
+      playerEmptyState.classList.add('hidden');
+      activePlayerView.classList.remove('hidden');
       playbackName.innerText = activeMediaMeta.name;
       playbackTimestamp.innerText = new Date(activeMediaMeta.timestamp).toLocaleTimeString();
       btnDownloadFull.href = activeMediaUrl;
@@ -1664,7 +1704,41 @@
         mediaEl.src = '';
       }
       await clearPlaybackFromIndexedDB();
-      playerPanel.classList.add('hidden');
+      loadPlayerUI();
+    });
+
+    const playerOfflineUpload = document.getElementById('playerOfflineUpload');
+    playerOfflineUpload.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const url = URL.createObjectURL(file);
+        const isVid = file.type.startsWith('video') || file.name.match(/.(mp4|webm|mkv|mov)$/i) !== null;
+        
+        const sizeFormatted = file.size < 1024 * 1024
+          ? (file.size / 1024).toFixed(1) + ' KB'
+          : (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+
+        activeMediaUrl = url;
+        activeMediaBlob = file;
+        activeMediaMeta = {
+          name: file.name,
+          size: sizeFormatted,
+          duration: 0,
+          type: isVid ? 'video' : 'audio',
+          mimeType: file.type || (isVid ? 'video/webm' : 'audio/wav'),
+          timestamp: new Date()
+        };
+
+        await savePlaybackToIndexedDB(file, {
+          name: file.name,
+          size: sizeFormatted,
+          duration: 0,
+          type: isVid ? 'video' : 'audio',
+          mimeType: file.type || (isVid ? 'video/webm' : 'audio/wav')
+        });
+
+        loadPlayerUI();
+      }
     });
 
     // --- RANGE TRIMMER CONTROLLERS ---
@@ -1735,7 +1809,7 @@
       const sSec = Math.max(0, rangeStart);
       const eSec = Math.min(activeMediaMeta.duration, rangeEnd);
       
-      const formatLabel = formatTime(sSec).replace(':', 'm') + 's_to_' + formatTime(eSec).replace(':', 'm') + 's';
+      const formatLabel = formatTime(sSec).replace(/:/g, 'm') + 's_to_' + formatTime(eSec).replace(/:/g, 'm') + 's';
       const ext = activeMediaMeta.type === 'video' ? 'webm' : 'wav';
       const newName = activeMediaMeta.name.replace(/.[^/.]+$/, '') + '_trimmed_' + formatLabel + '.' + ext;
 
@@ -1877,8 +1951,8 @@
           mimeType: savedPlayback.mimeType,
           timestamp: savedPlayback.timestamp
         };
-        loadPlayerUI();
       }
+      loadPlayerUI();
     });
   </script>
 </body>
