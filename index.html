@@ -366,7 +366,7 @@
             <!-- Visualizer 1 -->
             <div class="flex flex-col gap-1.5 p-3 rounded-xl border border-slate-100 bg-white">
               <div class="flex items-center justify-between text-xs">
-                <span class="font-semibold text-slate-700">Meet Tab Audio</span>
+                <span class="font-semibold text-slate-700">System Audio</span>
                 <span id="visLabelTab" class="text-[10px] text-slate-400 font-medium">Idle</span>
               </div>
               <canvas id="canvasTab"></canvas>
@@ -1519,6 +1519,77 @@
       return activeMediaMeta.type === 'video' ? playerVideo : playerAudio;
     }
 
+    function updateRangeSlidersUI(sStart, sEnd, totalD) {
+      const dur = Math.max(1, totalD || 0);
+      rangeStart = Math.min(Math.max(0, sStart), Math.max(0, dur - 0.5));
+      rangeEnd = Math.max(Math.min(dur, sEnd), Math.min(dur, rangeStart + 0.5));
+
+      rangeStartSlider.min = "0";
+      rangeStartSlider.max = (Math.max(0, dur - 0.5)).toString();
+      rangeStartSlider.step = "0.1";
+      rangeStartSlider.value = rangeStart.toString();
+
+      rangeEndSlider.min = (Math.min(dur, rangeStart + 0.5)).toString();
+      rangeEndSlider.max = dur.toString();
+      rangeEndSlider.step = "0.1";
+      rangeEndSlider.value = rangeEnd.toString();
+
+      rangeStartText.innerText = formatTime(rangeStart);
+      rangeEndText.innerText = formatTime(rangeEnd);
+      clipLengthLabel.innerText = formatTime(Math.max(0, rangeEnd - rangeStart));
+      durationLabel.innerText = formatTime(dur);
+      const playerDurationTextEl = document.getElementById('playerDurationText');
+      if (playerDurationTextEl) playerDurationTextEl.innerText = formatTime(dur);
+
+      const maxStart = Math.max(1, dur - 0.5);
+      const pctStart = Math.min(100, Math.max(0, (rangeStart / maxStart) * 100));
+      rangeStartSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + pctStart + '%, #1e293b ' + pctStart + '%, #1e293b 100%)';
+
+      const minEnd = Math.min(dur, rangeStart + 0.5);
+      const diffEnd = dur - minEnd;
+      const pctEnd = diffEnd > 0 ? Math.min(100, Math.max(0, ((rangeEnd - minEnd) / diffEnd) * 100)) : 100;
+      rangeEndSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + pctEnd + '%, #1e293b ' + pctEnd + '%, #1e293b 100%)';
+    }
+
+    function syncMediaDuration() {
+      if (!mediaEl || !activeMediaMeta) return;
+      const d = mediaEl.duration;
+      if (d && !isNaN(d) && isFinite(d) && d > 0) {
+        const realDur = Math.round(d);
+        const needUpdate = activeMediaMeta.duration !== realDur;
+        activeMediaMeta.duration = realDur;
+        
+        if (needUpdate && activeMediaBlob) {
+          savePlaybackToIndexedDB(activeMediaBlob, {
+            ...activeMediaMeta,
+            duration: realDur
+          }).catch(() => {});
+        }
+
+        const curStart = typeof rangeStart === 'number' ? rangeStart : 0;
+        const curEnd = (typeof rangeEnd === 'number' && rangeEnd > 0 && rangeEnd <= realDur) ? rangeEnd : realDur;
+        updateRangeSlidersUI(curStart, curEnd, realDur);
+      }
+    }
+
+    function handleLoadedMetadata() {
+      if (!mediaEl) return;
+
+      // WebM Chromium duration = Infinity workaround
+      if (mediaEl.duration === Infinity || isNaN(mediaEl.duration)) {
+        mediaEl.currentTime = 1e101;
+        const onWebmTimeUpdate = () => {
+          if (!mediaEl) return;
+          mediaEl.currentTime = 0;
+          mediaEl.removeEventListener('timeupdate', onWebmTimeUpdate);
+          syncMediaDuration();
+        };
+        mediaEl.addEventListener('timeupdate', onWebmTimeUpdate);
+      } else {
+        syncMediaDuration();
+      }
+    }
+
     function loadPlayerUI() {
       const playerEmptyState = document.getElementById('playerEmptyState');
       const activePlayerView = document.getElementById('activePlayerView');
@@ -1537,21 +1608,10 @@
       btnDownloadFull.download = activeMediaMeta.name;
 
       document.getElementById('playerSizeText').innerText = activeMediaMeta.size;
-      document.getElementById('playerDurationText').innerText = formatTime(activeMediaMeta.duration);
-      durationLabel.innerText = formatTime(activeMediaMeta.duration);
 
-      // Reset Range Sliders
-      rangeStart = 0;
-      rangeEnd = activeMediaMeta.duration;
-      rangeStartSlider.max = Math.max(0, rangeEnd - 1);
-      rangeStartSlider.value = 0;
-      rangeEndSlider.min = Math.min(activeMediaMeta.duration, rangeStart + 1);
-      rangeEndSlider.max = activeMediaMeta.duration;
-      rangeEndSlider.value = activeMediaMeta.duration;
-      
-      rangeStartText.innerText = formatTime(0);
-      rangeEndText.innerText = formatTime(activeMediaMeta.duration);
-      clipLengthLabel.innerText = formatTime(activeMediaMeta.duration);
+      // Initialize range sliders UI
+      const dur = activeMediaMeta.duration || 0;
+      updateRangeSlidersUI(0, dur, dur);
 
       if (activeMediaMeta.type === 'video') {
         videoContainer.classList.remove('hidden');
@@ -1570,32 +1630,16 @@
       }
 
       // Configure media element listeners
-      mediaEl.onloadedmetadata = () => {
-        const rawDur = mediaEl.duration;
-        if (rawDur && !isNaN(rawDur) && isFinite(rawDur)) {
-          const d = Math.max(1, Math.round(rawDur));
-          activeMediaMeta.duration = d;
-          durationLabel.innerText = formatTime(d);
-          document.getElementById('playerDurationText').innerText = formatTime(d);
-          
-          // Adjust end ranges
-          if (rangeEnd > d) {
-            rangeEnd = d;
-            rangeEndSlider.value = d;
-            rangeEndSlider.max = d;
-            rangeEndText.innerText = formatTime(d);
-            clipLengthLabel.innerText = formatTime(Math.max(0, rangeEnd - rangeStart));
-          }
-        }
-      };
+      mediaEl.onloadedmetadata = handleLoadedMetadata;
+      mediaEl.ondurationchange = syncMediaDuration;
+      mediaEl.oncanplay = syncMediaDuration;
 
       mediaEl.ontimeupdate = () => {
-        const curr = mediaEl.currentTime;
+        const total = activeMediaMeta && activeMediaMeta.duration > 0 ? activeMediaMeta.duration : 1;
+        const curr = mediaEl.currentTime || 0;
         currentTimeLabel.innerText = formatTime(curr);
-        timelineSlider.value = (curr / activeMediaMeta.duration) * 100;
-
-        // Custom filled background track
-        const p = (curr / activeMediaMeta.duration) * 100;
+        const p = Math.min(100, Math.max(0, (curr / total) * 100));
+        timelineSlider.value = p;
         timelineSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + p + '%, #1e293b ' + p + '%, #1e293b 100%)';
 
         // Check range limit in preview mode
@@ -1640,8 +1684,9 @@
 
     timelineSlider.addEventListener('input', (e) => {
       if (!mediaEl || !activeMediaMeta) return;
+      const total = activeMediaMeta.duration > 0 ? activeMediaMeta.duration : 1;
       const pct = parseFloat(e.target.value);
-      const targetTime = (pct / 100) * activeMediaMeta.duration;
+      const targetTime = (pct / 100) * total;
       mediaEl.currentTime = targetTime;
       currentTimeLabel.innerText = formatTime(targetTime);
     });
@@ -1756,11 +1801,12 @@
 
     rangeStartSlider.addEventListener('input', (e) => {
       if (!activeMediaMeta) return;
-      const val = parseFloat(e.target.value);
-      rangeStart = (val / 100) * (activeMediaMeta.duration - 1);
-      
-      // Update End Slider constraints
-      rangeEndSlider.min = Math.min(activeMediaMeta.duration, rangeStart + 1);
+      const dur = Math.max(1, activeMediaMeta.duration || 1);
+      let val = parseFloat(e.target.value);
+      if (isNaN(val)) val = 0;
+
+      rangeStart = Math.min(val, Math.max(0, rangeEnd - 0.5));
+      rangeEndSlider.min = (Math.min(dur, rangeStart + 0.5)).toString();
 
       rangeStartText.innerText = formatTime(rangeStart);
       clipLengthLabel.innerText = formatTime(Math.max(0, rangeEnd - rangeStart));
@@ -1770,14 +1816,19 @@
         currentTimeLabel.innerText = formatTime(rangeStart);
       }
       
-      const pct = (rangeStart / (activeMediaMeta.duration - 1)) * 100;
-      rangeStartSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + pct + '%, #1e293b ' + pct + '%, #1e293b 100%)';
+      const maxStart = Math.max(1, dur - 0.5);
+      const pctStart = Math.min(100, Math.max(0, (rangeStart / maxStart) * 100));
+      rangeStartSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + pctStart + '%, #1e293b ' + pctStart + '%, #1e293b 100%)';
     });
 
     rangeEndSlider.addEventListener('input', (e) => {
       if (!activeMediaMeta) return;
-      const val = parseFloat(e.target.value);
-      rangeEnd = val;
+      const dur = Math.max(1, activeMediaMeta.duration || 1);
+      let val = parseFloat(e.target.value);
+      if (isNaN(val)) val = dur;
+
+      rangeEnd = Math.max(val, Math.min(dur, rangeStart + 0.5));
+      rangeStartSlider.max = (Math.max(0, rangeEnd - 0.5)).toString();
 
       rangeEndText.innerText = formatTime(rangeEnd);
       clipLengthLabel.innerText = formatTime(Math.max(0, rangeEnd - rangeStart));
@@ -1787,10 +1838,10 @@
         currentTimeLabel.innerText = formatTime(rangeEnd);
       }
 
-      const min = Math.min(activeMediaMeta.duration, rangeStart + 1);
-      const diff = activeMediaMeta.duration - min;
-      const pct = diff > 0 ? ((rangeEnd - min) / diff) * 100 : 100;
-      rangeEndSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + pct + '%, #1e293b ' + pct + '%, #1e293b 100%)';
+      const minEnd = Math.min(dur, rangeStart + 0.5);
+      const diffEnd = dur - minEnd;
+      const pctEnd = diffEnd > 0 ? Math.min(100, Math.max(0, ((rangeEnd - minEnd) / diffEnd) * 100)) : 100;
+      rangeEndSlider.style.background = 'linear-gradient(to right, #14b8a6 0%, #14b8a6 ' + pctEnd + '%, #1e293b ' + pctEnd + '%, #1e293b 100%)';
     });
 
     btnPreviewRange.addEventListener('click', () => {
