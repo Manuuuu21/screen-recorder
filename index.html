@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Meet Screen & Audio Recorder (Offline Portable Version)</title>
+  <title>Screen & Audio Recorder</title>
   
   <!-- Tailwind CSS CDN for elegant layouts when connected to the internet -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -150,7 +150,7 @@
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">
-            Meet Recorder <span class="text-teal-600 font-normal text-2xl sm:text-3xl block sm:inline sm:ml-2">Offline App</span>
+            Screen Recorder <span class="text-teal-600 font-normal text-2xl sm:text-3xl block sm:inline sm:ml-2">Offline App</span>
           </h1>
           <p class="text-slate-600 max-w-2xl text-sm sm:text-base mt-1">
             This is a self-contained, offline-compatible recording utility. Load this from local storage (<code class="bg-slate-100 px-1 py-0.5 rounded font-mono text-xs">file:///</code>) anywhere with zero internet connection. Your streams remain entirely private.
@@ -297,8 +297,8 @@
                 id="audioSourceSelect"
                 class="w-full py-3.5 px-4 bg-slate-50 border border-slate-100 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
               >
-                <option value="both">🎙️ Both (Tab Audio + Microphone)</option>
-                <option value="tab">💻 Tab Audio Only</option>
+                <option value="both">🎙️ Both (System Audio + Microphone)</option>
+                <option value="tab">💻 System Audio Only</option>
                 <option value="microphone">🎤 Your Microphone Only</option>
               </select>
             </div>
