@@ -235,25 +235,36 @@
             <!-- Format Selection -->
             <div class="flex flex-col gap-4">
               <div class="flex flex-col gap-2">
-                <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Output Format
-                </label>
+                <div class="flex items-center justify-between">
+                  <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Output Format
+                  </label>
+                  <span id="formatBadgeLabel" class="text-[11px] font-semibold text-teal-600">
+                    MP3 Audio (192 kbps)
+                  </span>
+                </div>
                 <div class="grid grid-cols-2 gap-2">
                   <button
                     id="optAudioOnly"
                     type="button"
-                    class="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-all bg-teal-50 border-teal-500 text-teal-700 shadow-xs"
+                    class="flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-xl border text-sm font-semibold transition-all bg-teal-50 border-teal-500 text-teal-700 shadow-xs cursor-pointer"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-                    Audio Only
+                    <div class="flex items-center gap-1.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                      <span>Audio Only</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-normal opacity-80">.mp3 format</span>
                   </button>
                   <button
                     id="optVideoAudio"
                     type="button"
-                    class="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-all border-slate-100 hover:border-slate-200 text-slate-700 bg-slate-50/50"
+                    class="flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-xl border text-sm font-semibold transition-all border-slate-100 hover:border-slate-200 text-slate-700 bg-slate-50/50 cursor-pointer"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                    Video + Audio
+                    <div class="flex items-center gap-1.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                      <span>Video + Audio</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-normal opacity-80">.mp4 format</span>
                   </button>
                 </div>
               </div>
@@ -779,7 +790,7 @@
     <!-- Footer Divider & Content -->
     <div class="border-t border-slate-200/60 mt-2 pt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-slate-500">
       <div>
-        Meet Screen & Audio Recorder • <span class="text-teal-600 font-semibold">Created by Manuel G. Sintos</span>
+        Screen & Audio Recorder • <span class="text-teal-600 font-semibold">Created by Manuel G. Sintos</span>
       </div>
       <div class="text-slate-400">
         Client-side IndexedDB chunk streaming engine
@@ -788,10 +799,77 @@
 
   </div>
 
+  <!-- Embedded MP3 Encoder Engine (LameJS) -->
+  <script src="lime.min.js"></script>
+
   <!-- Portable JavaScript Core Logic -->
   <script>
+    // --- MP3 ENCODING UTILITIES ---
+    function audioBufferToMp3(audioBuffer, kbps = 192) {
+      if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
+        throw new Error('MP3 encoder not initialized');
+      }
+      const channels = audioBuffer.numberOfChannels;
+      const sampleRate = audioBuffer.sampleRate;
+      const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+      const mp3Data = [];
+      const sampleBlockSize = 1152;
+      const length = audioBuffer.length;
+
+      const leftFloat = audioBuffer.getChannelData(0);
+      const rightFloat = channels > 1 ? audioBuffer.getChannelData(1) : leftFloat;
+
+      const leftInt16 = new Int16Array(length);
+      const rightInt16 = channels > 1 ? new Int16Array(length) : leftInt16;
+
+      for (let i = 0; i < length; i++) {
+        const sL = Math.max(-1, Math.min(1, leftFloat[i]));
+        leftInt16[i] = sL < 0 ? sL * 0x8000 : sL * 0x7FFF;
+        if (channels > 1) {
+          const sR = Math.max(-1, Math.min(1, rightFloat[i]));
+          rightInt16[i] = sR < 0 ? sR * 0x8000 : sR * 0x7FFF;
+        }
+      }
+
+      for (let i = 0; i < length; i += sampleBlockSize) {
+        const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
+        let mp3buf;
+        if (channels === 1) {
+          mp3buf = mp3encoder.encodeBuffer(leftChunk);
+        } else {
+          const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
+          mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+        }
+        if (mp3buf.length > 0) {
+          mp3Data.push(new Uint8Array(mp3buf.buffer, mp3buf.byteOffset, mp3buf.byteLength));
+        }
+      }
+
+      const endMp3Buf = mp3encoder.flush();
+      if (endMp3Buf.length > 0) {
+        mp3Data.push(new Uint8Array(endMp3Buf.buffer, endMp3Buf.byteOffset, endMp3Buf.byteLength));
+      }
+
+      return new Blob(mp3Data, { type: 'audio/mp3' });
+    }
+
+    async function convertAudioBlobToMp3(audioBlob, kbps = 192) {
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      try {
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        return audioBufferToMp3(audioBuffer, kbps);
+      } finally {
+        if (audioCtx.state !== 'closed') {
+          audioCtx.close().catch(() => {});
+        }
+      }
+    }
+
     // --- STATE MACHINE ---
     let isRecording = false;
+    let isExporting = false;
     let recordingType = 'audio'; // 'audio' | 'video'
     let audioSource = 'tab'; // 'both' | 'tab' | 'microphone'
     let videoResolution = '1080p'; // '480p' | '720p' | '1080p'
@@ -1034,19 +1112,23 @@
       }
     });
 
+    const formatBadgeLabel = document.getElementById('formatBadgeLabel');
+
     // --- LAYOUTS ACTIONS ---
     optAudioOnly.addEventListener('click', () => {
       recordingType = 'audio';
-      optAudioOnly.className = "flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-all bg-teal-50 border-teal-500 text-teal-700 shadow-xs";
-      optVideoAudio.className = "flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-all border-slate-100 hover:border-slate-200 text-slate-700 bg-slate-50/50";
+      optAudioOnly.className = "flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-xl border text-sm font-semibold transition-all bg-teal-50 border-teal-500 text-teal-700 shadow-xs cursor-pointer";
+      optVideoAudio.className = "flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-xl border text-sm font-semibold transition-all border-slate-100 hover:border-slate-200 text-slate-700 bg-slate-50/50 cursor-pointer";
       resolutionField.classList.add('hidden');
+      if (formatBadgeLabel) formatBadgeLabel.innerText = 'MP3 Audio (192 kbps)';
     });
 
     optVideoAudio.addEventListener('click', () => {
       recordingType = 'video';
-      optVideoAudio.className = "flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-all bg-blue-50 border-blue-500 text-blue-700 shadow-xs";
-      optAudioOnly.className = "flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-all border-slate-100 hover:border-slate-200 text-slate-700 bg-slate-50/50";
+      optVideoAudio.className = "flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-xl border text-sm font-semibold transition-all bg-blue-50 border-blue-500 text-blue-700 shadow-xs cursor-pointer";
+      optAudioOnly.className = "flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-xl border text-sm font-semibold transition-all border-slate-100 hover:border-slate-200 text-slate-700 bg-slate-50/50 cursor-pointer";
       resolutionField.classList.remove('hidden');
+      if (formatBadgeLabel) formatBadgeLabel.innerText = 'MP4 Video (' + videoResolution + ')';
     });
 
     const setResClass = (selected) => {
@@ -1057,6 +1139,9 @@
           btn.className = "flex items-center justify-center py-2 px-3 rounded-xl border text-xs font-bold transition-all border-slate-100 hover:border-slate-200 text-slate-600 bg-slate-50/50 cursor-pointer";
         }
       });
+      if (recordingType === 'video' && formatBadgeLabel) {
+        formatBadgeLabel.innerText = 'MP4 Video (' + videoResolution + ')';
+      }
     };
 
     res480p.addEventListener('click', () => { videoResolution = '480p'; setResClass('480p'); });
@@ -1300,11 +1385,26 @@
         recoveryDetailsLabel.innerText = sizeMb + ' MB, duration: ' + formatTime(recovered.duration);
         
         // Wire recovery click
-        btnDownloadRecovered.onclick = () => {
-          const url = URL.createObjectURL(recovered.blob);
+        btnDownloadRecovered.onclick = async () => {
+          let dlBlob = recovered.blob;
+          let ext = recovered.recordingType === 'video' 
+            ? (recovered.blob.type.includes('mp4') ? 'mp4' : 'webm') 
+            : 'mp3';
+          
+          if (recovered.recordingType === 'audio') {
+            try {
+              dlBlob = await convertAudioBlobToMp3(recovered.blob);
+              ext = 'mp3';
+            } catch (err) {
+              console.warn('Recovered MP3 encoding fallback:', err);
+              ext = recovered.blob.type.includes('webm') ? 'webm' : 'wav';
+            }
+          }
+
+          const url = URL.createObjectURL(dlBlob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'Recovered_Offline_Meet_Recording_' + new Date().toISOString().slice(0, 10) + '.webm';
+          a.download = 'Recovered_Offline_Meet_Recording_' + new Date().toISOString().slice(0, 10) + '.' + ext;
           document.body.appendChild(a);
           a.click();
           setTimeout(() => {
@@ -1398,7 +1498,7 @@
 
         // 5. Setup Codec list and MediaRecorder
         const mimes = recordingType === 'video' 
-          ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+          ? ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
           : ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg', 'audio/aac', 'audio/wav'];
         
         let selectedMime = '';
@@ -1445,11 +1545,32 @@
         };
 
         mediaRecorder.onstop = async () => {
-          const finalBlob = new Blob(recordedChunks, { type: selectedMime });
+          let finalBlob;
+          let ext;
+          let finalMime;
+
+          if (recordingType === 'audio') {
+            const rawBlob = new Blob(recordedChunks, { type: selectedMime });
+            try {
+              finalBlob = await convertAudioBlobToMp3(rawBlob);
+              ext = 'mp3';
+              finalMime = 'audio/mp3';
+            } catch (err) {
+              console.warn('MP3 conversion fallback:', err);
+              finalBlob = rawBlob;
+              ext = selectedMime.includes('webm') ? 'webm' : selectedMime.includes('ogg') ? 'ogg' : 'wav';
+              finalMime = selectedMime;
+            }
+          } else {
+            finalBlob = new Blob(recordedChunks, { type: selectedMime });
+            ext = selectedMime.includes('mp4') ? 'mp4' : 'webm';
+            finalMime = selectedMime;
+          }
+
           const url = URL.createObjectURL(finalBlob);
           const dateStr = new Date().toISOString().slice(0, 10);
           const rand = Math.floor(1000 + Math.random() * 9000);
-          const name = (recordingType === 'video' ? 'Meet_Video_' : 'Meet_Audio_') + dateStr + '_' + rand + '.webm';
+          const name = (recordingType === 'video' ? 'Meet_Recording_' : 'Meet_Audio_') + dateStr + '_' + rand + '.' + ext;
 
           // Automatic download
           const a = document.createElement('a');
@@ -1473,7 +1594,7 @@
             size: sizeFormatted,
             duration: durSeconds,
             type: recordingType,
-            mimeType: selectedMime,
+            mimeType: finalMime,
             timestamp: new Date()
           };
 
@@ -1483,7 +1604,7 @@
             size: sizeFormatted,
             duration: durSeconds,
             type: recordingType,
-            mimeType: selectedMime
+            mimeType: finalMime
           });
 
           loadPlayerUI();
@@ -1493,6 +1614,7 @@
             clearRecoveryStorage();
           }, 200);
 
+          isExporting = false;
           isRecording = false;
           cleanupStreams();
         };
@@ -1522,13 +1644,13 @@
         if (recTelemetryTime) recTelemetryTime.innerText = '00:00';
         if (recTelemetryFormat) {
           recTelemetryFormat.innerText = recordingType === 'video' 
-            ? 'Video (' + videoResolution + ' @ ' + videoFps + 'fps)' 
-            : 'Audio Only';
+            ? 'Video (' + videoResolution + ' @ ' + videoFps + 'fps - MP4)' 
+            : 'MP3 Audio (192 kbps)';
         }
         if (recTelemetryStored) recTelemetryStored.innerText = '0 B';
         if (recTelemetryRate) recTelemetryRate.innerText = '0 B/s';
 
-        btnAction.className = "btn-rose w-full sm:w-auto flex items-center justify-center";
+        btnAction.className = "btn-rose w-full sm:w-auto flex items-center justify-center cursor-pointer";
         btnAction.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><rect x="4" y="4" width="16" height="16"/></svg>Stop & Export';
 
         timerInterval = setInterval(() => {
@@ -1558,7 +1680,11 @@
     }
 
     function stopRecording() {
+      if (isExporting) return;
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        isExporting = true;
+        btnAction.className = "btn-teal opacity-80 w-full sm:w-auto flex items-center justify-center cursor-wait";
+        btnAction.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' + (recordingType === 'audio' ? 'Encoding MP3...' : 'Finalizing MP4...');
         mediaRecorder.stop();
       }
       if (timerInterval) {
@@ -1938,21 +2064,23 @@
       if (!activeMediaBlob || !activeMediaMeta) return;
 
       const btnText = btnDownloadTrimmed.querySelector('span');
-      btnText.innerText = 'Trimming PCM...';
+      btnText.innerText = 'Trimming & Encoding...';
 
       const sSec = Math.max(0, rangeStart);
       const eSec = Math.min(activeMediaMeta.duration, rangeEnd);
       
       const formatLabel = formatTime(sSec).replace(/:/g, 'm') + 's_to_' + formatTime(eSec).replace(/:/g, 'm') + 's';
-      const ext = activeMediaMeta.type === 'video' ? 'webm' : 'wav';
+      const rawExt = (activeMediaMeta.name.split('.').pop() || (activeMediaMeta.type === 'video' ? 'mp4' : 'mp3')).toLowerCase();
+      const ext = activeMediaMeta.type === 'audio' ? 'mp3' : (rawExt === 'mp4' ? 'mp4' : 'webm');
       const newName = activeMediaMeta.name.replace(/.[^/.]+$/, '') + '_trimmed_' + formatLabel + '.' + ext;
 
       try {
         if (activeMediaMeta.type === 'audio') {
-          // WAV lossless decoder for clean offline trimming
+          // MP3 encoder for clean offline trimming
           const response = await fetch(activeMediaUrl);
           const arrayBuffer = await response.arrayBuffer();
-          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          const audioCtx = new AudioCtx();
           const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
           const sampleRate = decodedBuffer.sampleRate;
@@ -1968,8 +2096,8 @@
             destData.set(srcData.subarray(startFrame, endFrame));
           }
 
-          const wavBlob = audioBufferToWav(trimmedBuffer);
-          const dlUrl = URL.createObjectURL(wavBlob);
+          const mp3Blob = audioBufferToMp3(trimmedBuffer);
+          const dlUrl = URL.createObjectURL(mp3Blob);
           const a = document.createElement('a');
           a.href = dlUrl;
           a.download = newName;
@@ -1999,65 +2127,6 @@
         btnText.innerText = 'Download Range Clip';
       }
     });
-
-    // Helper conversion AudioBuffer to WAV
-    function audioBufferToWav(buffer) {
-      const numChannels = buffer.numberOfChannels;
-      const sampleRate = buffer.sampleRate;
-      const format = 1; // PCM
-      const bitDepth = 16;
-
-      let result;
-      if (numChannels === 2) {
-        const left = buffer.getChannelData(0);
-        const right = buffer.getChannelData(1);
-        result = new Float32Array(left.length + right.length);
-        for (let i = 0; i < left.length; i++) {
-          result[i * 2] = left[i];
-          result[i * 2 + 1] = right[i];
-        }
-      } else {
-        result = buffer.getChannelData(0);
-      }
-
-      const bytesPerSample = bitDepth / 8;
-      const blockAlign = numChannels * bytesPerSample;
-      const dataSize = result.length * bytesPerSample;
-      const headerSize = 44;
-      const totalSize = headerSize + dataSize;
-
-      const arrayBuffer = new ArrayBuffer(totalSize);
-      const dataView = new DataView(arrayBuffer);
-
-      const writeString = (view, offset, string) => {
-        for (let i = 0; i < string.length; i++) {
-          view.setUint8(offset + i, string.charCodeAt(i));
-        }
-      };
-
-      writeString(dataView, 0, 'RIFF');
-      dataView.setUint32(4, 36 + dataSize, true);
-      writeString(dataView, 8, 'WAVE');
-      writeString(dataView, 12, 'fmt ');
-      dataView.setUint32(16, 16, true);
-      dataView.setUint16(20, format, true);
-      dataView.setUint16(22, numChannels, true);
-      dataView.setUint32(24, sampleRate, true);
-      dataView.setUint32(28, sampleRate * blockAlign, true);
-      dataView.setUint16(32, blockAlign, true);
-      dataView.setUint16(34, bitDepth, true);
-      writeString(dataView, 36, 'data');
-      dataView.setUint32(40, dataSize, true);
-
-      let offset = 44;
-      for (let i = 0; i < result.length; i++) {
-        const s = Math.max(-1, Math.min(1, result[i]));
-        dataView.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-        offset += 2;
-      }
-
-      return new Blob([arrayBuffer], { type: 'audio/wav' });
-    }
 
     // --- MAIN INITIALIZER ---
     window.addEventListener('load', async () => {
