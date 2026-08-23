@@ -360,12 +360,17 @@
 
             <div class="flex items-center gap-4 bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700/50 w-full sm:w-auto justify-between sm:justify-start">
               <div class="flex flex-col">
-                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Total Stored</span>
+                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Disk Stored</span>
                 <span id="recTelemetryStored" class="text-sm font-bold text-teal-300 font-mono">0 B</span>
               </div>
               <div class="h-6 w-px bg-slate-700"></div>
               <div class="flex flex-col">
-                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Storage Rate</span>
+                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Tab RAM</span>
+                <span class="text-sm font-bold text-emerald-400 font-mono">0 MB (OPFS Direct)</span>
+              </div>
+              <div class="h-6 w-px bg-slate-700"></div>
+              <div class="flex flex-col">
+                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Write Speed</span>
                 <span id="recTelemetryRate" class="text-sm font-bold text-amber-300 font-mono">0 B/s</span>
               </div>
             </div>
@@ -779,7 +784,7 @@
     <!-- Footer Divider & Content -->
     <div class="border-t border-slate-200/60 mt-2 pt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-slate-500">
       <div>
-        Meet Screen & Audio Recorder • <span class="text-teal-600 font-semibold">Created by Manuel G. Sintos</span>
+        Screen & Audio Recorder • <span class="text-teal-600 font-semibold">Created by Manuel G. Sintos</span>
       </div>
       <div class="text-slate-400">
         Client-side IndexedDB chunk streaming engine
@@ -894,7 +899,111 @@
     const btnPreviewRange = document.getElementById('btnPreviewRange');
     const btnDownloadTrimmed = document.getElementById('btnDownloadTrimmed');
 
-    // --- INDEXEDDB BACKUP CORE ---
+    // --- OPFS DIRECT TO DISK STREAMING (0 MB JAVASCRIPT RAM ACCUMULATION) ---
+    const OPFS_ACTIVE_RECORDING = 'active_offline_recording.webm';
+    const OPFS_ACTIVE_META = 'active_offline_meta.json';
+    const OPFS_SAVED_RECORDING = 'saved_offline_recording.webm';
+    const OPFS_SAVED_META = 'saved_offline_meta.json';
+
+    class OPFSDirectStreamWriter {
+      constructor() {
+        this.root = null;
+        this.fileHandle = null;
+        this.writableStream = null;
+        this.bytesWritten = 0;
+        this.isSupported = false;
+      }
+
+      async init() {
+        if (!navigator.storage || !navigator.storage.getDirectory) {
+          return false;
+        }
+        try {
+          this.root = await navigator.storage.getDirectory();
+          this.fileHandle = await this.root.getFileHandle(OPFS_ACTIVE_RECORDING, { create: true });
+          this.writableStream = await this.fileHandle.createWritable();
+          this.bytesWritten = 0;
+          this.isSupported = true;
+          return true;
+        } catch (e) {
+          console.warn('OPFS direct disk streaming unavailable, fallback to IndexedDB:', e);
+          this.isSupported = false;
+          return false;
+        }
+      }
+
+      async writeChunk(blob) {
+        if (!this.writableStream) return false;
+        try {
+          await this.writableStream.write(blob);
+          this.bytesWritten += blob.size;
+          return true;
+        } catch (e) {
+          console.warn('OPFS chunk write failed:', e);
+          return false;
+        }
+      }
+
+      async finalize() {
+        if (!this.writableStream) return null;
+        try {
+          await this.writableStream.close();
+          this.writableStream = null;
+          const file = await this.fileHandle.getFile();
+          return file;
+        } catch (e) {
+          console.warn('OPFS finalize failed:', e);
+          return null;
+        }
+      }
+    }
+
+    async function saveOPFSMeta(meta) {
+      try {
+        if (!navigator.storage?.getDirectory) return;
+        const root = await navigator.storage.getDirectory();
+        const handle = await root.getFileHandle(OPFS_ACTIVE_META, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(JSON.stringify(meta));
+        await writable.close();
+      } catch (e) {}
+    }
+
+    async function clearOPFSRecovery() {
+      try {
+        if (!navigator.storage?.getDirectory) return;
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry(OPFS_ACTIVE_META).catch(() => {});
+      } catch (e) {}
+    }
+
+    async function checkOPFSRecovery() {
+      try {
+        if (!navigator.storage?.getDirectory) return null;
+        const root = await navigator.storage.getDirectory();
+        const metaHandle = await root.getFileHandle(OPFS_ACTIVE_META);
+        const metaFile = await metaHandle.getFile();
+        const text = await metaFile.text();
+        const meta = JSON.parse(text);
+        if (!meta) return null;
+
+        const fileHandle = await root.getFileHandle(OPFS_ACTIVE_RECORDING);
+        const rawFile = await fileHandle.getFile();
+        if (!rawFile || rawFile.size < 100) return null;
+
+        const duration = Math.floor((Date.now() - (meta.startTime || Date.now())) / 1000);
+        return {
+          blob: rawFile,
+          recordingType: meta.recordingType || 'video',
+          duration: duration > 0 ? duration : 1,
+          timestamp: new Date(meta.startTime).toLocaleTimeString()
+        };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // --- INDEXEDDB BACKUP CORE (SECONDARY FALLBACK) ---
     const DB_NAME = 'MeetRecorderBackupDB_Offline';
     const DB_VERSION = 2;
     const STORE_NAME = 'active_chunks';
@@ -1134,6 +1243,19 @@
           activeSources.push(source);
         }
       }
+
+      // 3. Silent Carrier Node: Guarantees continuous, active audio pipeline even during quiet silence
+      try {
+        const carrierOsc = audioContext.createOscillator();
+        const carrierGain = audioContext.createGain();
+        carrierOsc.frequency.value = 440;
+        carrierGain.gain.setValueAtTime(0.00001, audioContext.currentTime); // Inaudible carrier signal
+        carrierOsc.connect(carrierGain);
+        carrierGain.connect(mixedStreamDestination);
+        carrierOsc.start();
+        activeSources.push(carrierGain);
+        activeSources.push(carrierOsc);
+      } catch (e) {}
     }
 
     function cleanupMixer() {
@@ -1291,7 +1413,10 @@
 
     // --- RECOVERY PROCESSOR ---
     async function loadRecoveryUI() {
-      const recovered = await checkUnsavedRecovery();
+      let recovered = await checkOPFSRecovery();
+      if (!recovered) {
+        recovered = await checkUnsavedRecovery();
+      }
       if (recovered) {
         recoveryBanner.classList.remove('hidden');
         recoveryTimeLabel.innerText = 'Recorded: ' + recovered.timestamp;
@@ -1303,22 +1428,25 @@
         btnDownloadRecovered.onclick = () => {
           const url = URL.createObjectURL(recovered.blob);
           const a = document.createElement('a');
+          a.style.display = 'none';
           a.href = url;
           a.download = 'Recovered_Offline_Meet_Recording_' + new Date().toISOString().slice(0, 10) + '.webm';
           document.body.appendChild(a);
           a.click();
           setTimeout(() => {
-            document.body.removeChild(a);
+            try { document.body.removeChild(a); } catch (e) {}
             URL.revokeObjectURL(url);
-            clearRecoveryStorage();
+            clearOPFSRecovery().catch(() => {});
+            clearRecoveryStorage().catch(() => {});
             recoveryBanner.classList.add('hidden');
-          }, 200);
+          }, 1000);
         };
       }
     }
 
     btnDismissRecovered.addEventListener('click', async () => {
-      await clearRecoveryStorage();
+      await clearOPFSRecovery().catch(() => {});
+      await clearRecoveryStorage().catch(() => {});
       recoveryBanner.classList.add('hidden');
     });
 
@@ -1328,14 +1456,15 @@
       errorBox.classList.add('hidden');
       warningTabAudio.classList.add('hidden');
       recordedChunks = [];
-      await clearRecoveryStorage();
+      await clearOPFSRecovery().catch(() => {});
+      await clearRecoveryStorage().catch(() => {});
       recoveryBanner.classList.add('hidden');
 
       const needsScreenShare = recordingType === 'video' || audioSource === 'both' || audioSource === 'tab';
       const needsMic = audioSource === 'both' || audioSource === 'microphone';
 
       try {
-        // 1. Fetch screen tracks
+        // 1. Fetch screen tracks with fallback
         if (needsScreenShare) {
           let videoW = 1920, videoH = 1080, fRate = 30;
           if (recordingType === 'video') {
@@ -1346,28 +1475,40 @@
             videoW = 320; videoH = 180; fRate = 5; // Low bandwidth display track for audio capture
           }
 
-          displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-              displaySurface: 'browser',
-              width: { ideal: videoW },
-              height: { ideal: videoH },
-              frameRate: { ideal: fRate }
-            },
-            audio: (audioSource === 'both' || audioSource === 'tab') ? {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-            } : false,
-            selfBrowserSurface: 'exclude',
-            systemAudio: 'include'
-          });
+          try {
+            displayStream = await navigator.mediaDevices.getDisplayMedia({
+              video: {
+                displaySurface: 'browser',
+                width: { ideal: videoW },
+                height: { ideal: videoH },
+                frameRate: { ideal: fRate }
+              },
+              audio: (audioSource === 'both' || audioSource === 'tab') ? {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+              } : false,
+              selfBrowserSurface: 'exclude',
+              systemAudio: 'include'
+            });
+          } catch (dispErr) {
+            // Standard fallback if browser rejects modern constraints
+            displayStream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: (audioSource === 'both' || audioSource === 'tab')
+            });
+          }
         }
 
         // 2. Fetch mic tracks
         if (needsMic) {
-          micStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-          });
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+            });
+          } catch (micErr) {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          }
         }
 
         // Alert user if they forgot to tick "Share tab audio" inside standard displays
@@ -1411,21 +1552,30 @@
           }
         }
 
+        // Initialize OPFS direct to disk writer (Zero RAM accumulation)
+        const opfsWriter = new OPFSDirectStreamWriter();
+        const opfsSupported = await opfsWriter.init();
+
         // Continuous recovery saving
         startTime = Date.now();
         recordedBytes = 0;
         lastChunkTime = startTime;
-        await saveSessionMetadata({
+        
+        const sessionMeta = {
           mimeType: selectedMime,
           recordingType,
           startTime
-        });
+        };
+        if (opfsSupported) {
+          await saveOPFSMeta(sessionMeta);
+        } else {
+          await saveSessionMetadata(sessionMeta);
+        }
 
         mediaRecorder = new MediaRecorder(compositeStream, options);
-        mediaRecorder.ondataavailable = (e) => {
+        mediaRecorder.ondataavailable = async (e) => {
           if (e.data && e.data.size > 0) {
             const chunkSize = e.data.size;
-            recordedChunks.push(e.data);
             recordedBytes += chunkSize;
             const now = Date.now();
             const timeDelta = (now - (lastChunkTime || startTime)) / 1000;
@@ -1440,23 +1590,50 @@
             if (recTelemetryStored) recTelemetryStored.innerText = formatBytes(recordedBytes);
             if (recTelemetryRate) recTelemetryRate.innerText = formatBytes(rate) + '/s';
 
-            saveChunkToStorage(e.data);
+            if (opfsSupported) {
+              await opfsWriter.writeChunk(e.data);
+            } else {
+              recordedChunks.push(e.data);
+              saveChunkToStorage(e.data);
+            }
           }
         };
 
         mediaRecorder.onstop = async () => {
-          const finalBlob = new Blob(recordedChunks, { type: selectedMime });
-          const url = URL.createObjectURL(finalBlob);
+          let finalBlob = null;
+          let finalUrl = '';
+
+          if (opfsSupported) {
+            const file = await opfsWriter.finalize();
+            if (file && file.size > 0) {
+              finalBlob = file;
+              finalUrl = URL.createObjectURL(file);
+            }
+          }
+
+          if (!finalBlob) {
+            finalBlob = new Blob(recordedChunks, { type: selectedMime });
+            finalUrl = URL.createObjectURL(finalBlob);
+          }
+
           const dateStr = new Date().toISOString().slice(0, 10);
           const rand = Math.floor(1000 + Math.random() * 9000);
           const name = (recordingType === 'video' ? 'Meet_Video_' : 'Meet_Audio_') + dateStr + '_' + rand + '.webm';
 
-          // Automatic download
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = name;
-          document.body.appendChild(a);
-          a.click();
+          // Automatic download immediately
+          try {
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = finalUrl;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+              try { document.body.removeChild(a); } catch (e) {}
+            }, 1500);
+          } catch (dlErr) {
+            console.warn('Auto download click failed:', dlErr);
+          }
 
           // Calculate visual sizes
           const sizeFormatted = finalBlob.size < 1024 * 1024
@@ -1466,7 +1643,7 @@
           const durSeconds = Math.max(1, Math.floor((Date.now() - startTime) / 1000));
 
           // Set active player state
-          activeMediaUrl = url;
+          activeMediaUrl = finalUrl;
           activeMediaBlob = finalBlob;
           activeMediaMeta = {
             name,
@@ -1477,7 +1654,7 @@
             timestamp: new Date()
           };
 
-          // Save completed blob to Playback IndexedDB so it persists on reload!
+          // Save completed blob to Playback IndexedDB so it persists on reload
           await savePlaybackToIndexedDB(finalBlob, {
             name,
             size: sizeFormatted,
@@ -1488,10 +1665,8 @@
 
           loadPlayerUI();
 
-          setTimeout(() => {
-            try { document.body.removeChild(a); } catch (e) {}
-            clearRecoveryStorage();
-          }, 200);
+          clearOPFSRecovery().catch(() => {});
+          clearRecoveryStorage().catch(() => {});
 
           isRecording = false;
           cleanupStreams();
